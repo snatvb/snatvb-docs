@@ -1,9 +1,13 @@
+import { Tabs } from 'nextra/components'
+
+# Составные компоненты
+
 Составные компоненты – это такие компоненты, которые состоят из нескольких частей. Вместо того, чтобы делать непонятные столы, напичкать компонент шаблона логикой с кучей пропсов - подумайте много-много раз, возможно здесь подойдет как раз compound подход.
 
 Рассмотрим вариант такого компонента – табы ([первоисточник](https://blog.logrocket.com/understanding-react-compound-components/)).
 
 Давайте визуализируем:
-![Example timeline](./assets/tabs-schema.png)
+![Tabs](./assets/tabs-schema.png)
 
 Как можно заметить, компонент состоит из нескольких частей.
 
@@ -142,4 +146,123 @@ Tabs.Switch = Switch
 Tabs.Content = Content
 
 export { Tabs }
+```
+
+Опишем остальное:
+
+```tsx filename="Switch.tsx"
+import cx from 'classnames'
+import React from 'react'
+
+import { Button } from '../Button/Button'
+import styles from './Tabs.module.scss'
+import { useTabsContext } from './context'
+
+export type SwitchProps = {
+  tabId: string
+  children: React.ReactNode
+  className?: string
+}
+
+export function Switch({ tabId, ...props }: SwitchProps) {
+  const tabs = useTabsContext()
+  const className = cx(styles.tabButton, props.className)
+
+  if (tabs.active === tabId) {
+    return <Button {...props} className={className} disabled theme="rock" />
+  }
+  return (
+    <Button
+      {...props}
+      theme="empty"
+      className={className}
+      onClick={() => tabs.change(tabId)}
+    />
+  )
+}
+```
+
+```tsx filename="Switcher.tsx"
+import cx from 'classnames'
+import React from 'react'
+
+import styles from './Tabs.module.scss'
+import { useTabsContext } from './context'
+
+export type SwitcherProps = React.ComponentProps<'div'>
+
+export const Switcher = React.forwardRef<HTMLDivElement, SwitcherProps>(
+  function Switcher({ className, ...restProps }: SwitcherProps, ref) {
+    const { theme } = useTabsContext()
+    return (
+      <div
+        ref={ref}
+        className={cx(styles.base, styles[`base__theme-${theme}`])}
+        {...restProps}
+      />
+    )
+  },
+)
+```
+
+```tsx filename="context.tsx"
+import { createContext, useContext } from 'react'
+
+export const themes = {
+  primary: 'primary',
+} as const
+
+export type Theme = ValueOf<typeof themes>
+
+export type Context = {
+  theme: Theme
+  active: string
+  change: (id: string) => void
+}
+
+export const TabsContext = createContext<Context | null>(null)
+
+export function useTabsContext() {
+  const context = useContext(TabsContext)
+  if (context === null) {
+    throw new Error('You can use tabs hooks only with Tabs component')
+  }
+  return context
+}
+```
+
+```tsx filename="Content.tsx"
+import { Fragment } from 'react'
+
+import { useTabsContext } from './context'
+
+export type ContentProps = {
+  children: (active: string) => JSX.Element | null
+}
+
+export function Content({ children }: ContentProps) {
+  const tabs = useTabsContext()
+
+  return <Fragment key={tabs.active}>{children(tabs.active)}</Fragment>
+}
+```
+
+Теперь, как можно заметить мы получаем составной компонент, который можно использовать гибко. Так же можно внутри `Tab` отобразить любой контент - текст, иконку, иконку с текстом, с уведомлением и тд и тп.
+
+Так же можно подписаться на любой элемент, взять `ref`, сделать анимации, сделать кастомные переключатели, сохранив логику работы табов.
+
+```scss filename="Tabs.module.scss"
+.base {
+  padding: 6px;
+  background: #1f2331;
+  border-radius: 12px;
+  display: flex;
+  align-items: stretch;
+  justify-self: stretch;
+}
+
+.tabButton {
+  flex: 1 1 auto;
+  text-align: center;
+}
 ```
