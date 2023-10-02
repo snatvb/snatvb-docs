@@ -1,0 +1,289 @@
+import { Tabs } from 'nextra/components'
+
+# Составные компоненты
+
+Составные компоненты – это такие компоненты, которые состоят из нескольких частей. Вместо того, чтобы делать непонятные столы, напичкать компонент шаблона логикой с кучей пропсов - подумайте много-много раз, возможно здесь подойдет как раз compound подход.
+
+Рассмотрим вариант такого компонента – табы ([первоисточник](https://blog.logrocket.com/understanding-react-compound-components/)).
+
+Давайте визуализируем:
+![Tabs](./assets/tabs-schema.png)
+
+Как можно заметить, компонент состоит из нескольких частей.
+
+Выделяем главный уровень: переключатель(управление) и отображение контента. Уже 2 компонета.
+
+Давайте представим, что кто то захочет изменить визуализацию самих табов, внутрь самого таба положить иконочку, стикер или еще чего. Мы как разработчики компонента, не знаем, чего захочет пользователь, но мы хотим ему предоставить гибкость, которая позволит сделать максимально, что возможно. Представьте, что вы продаете этот компонент в подписку, и чем дольше пользуется человек вашим компонентом – тем вы больше богатеете, но если он сделает копипасту и переделает ваш компонент, вы теряете его оплату, потому что он ушел от вашего компонента в свою реализацию. Вы должны быть заинтересованы в максимально длительном использовании вашего компонента.
+
+Так же, хотелось бы избежать рендера ненужного JSX. Да, реального рендера не будет, но в виртуальный дом оно попадает, создает лишние объекты, нагружает GC и тратит лишнюю память.
+
+Тогда можно накидать примерное API, то, как пользователь нашего компонента будет его использовать. Мне бы хотелось, чтобы пользователь не мучался с тем, какие есть компоненты, потому это будет использоваться так: `Tabs.Switcher`, `Tabs.Switch`, `Tabs.Content`:
+
+```tsx
+<Tabs.Switcher>
+  <Tabs.Switch tabId="1" tabSize="medium">
+    Tab 1
+  </Tabs.Switch>
+  <Tabs.Switch tabId="2" tabSize="medium">
+    Tab 2
+  </Tabs.Switch>
+</Tabs.Switcher>
+<Tabs.Content>
+  {(currentTabId) => {
+    switch (currentTabId) {
+      case '1':
+        return <div className={cx(styles.body, styles[`body_first`])} />
+      case '2':
+        return (
+          <div className={cx(styles.body, styles[`body_second`])} />
+        )
+      default:
+        console.error('Unreachable branch in tabs')
+        return null
+    }
+  }}
+</Tabs.Content>
+```
+
+Но при таком использовании нет связи между переключателем и контентом, сделаем `Tabs` как компонент и добавим контекст.
+
+Итог будет такой:
+
+```tsx
+<Tabs active={currentTabId} onActiveChange={handleChangeId}>
+  <Tabs.Switcher>
+    <Tabs.Switch tabId="1" tabSize="medium">
+      Tab 1
+    </Tabs.Switch>
+    <Tabs.Switch tabId="2" tabSize="medium">
+      Tab 2
+    </Tabs.Switch>
+    <Tabs.Switch tabId="3" tabSize="medium">
+      Tab 3
+    </Tabs.Switch>
+    <Tabs.Switch tabId="4" tabSize="medium">
+      Tab 4
+    </Tabs.Switch>
+    <Tabs.Switch tabId="5" tabSize="medium">
+      Tab 5
+    </Tabs.Switch>
+  </Tabs.Switcher>
+  <Tabs.Content>
+    {(currentTabId) => {
+      switch (currentTabId) {
+        case '1':
+          return <div className={cx(styles.body, styles[`body_first`])} />
+        case '2':
+          return <div className={cx(styles.body, styles[`body_second`])} />
+        case '3':
+          return <div className={cx(styles.body, styles[`body_third`])} />
+        case '4':
+          return <div className={cx(styles.body, styles[`body_fourth`])} />
+        case '5':
+          return <div className={cx(styles.body, styles[`body_fifth`])} />
+        default:
+          console.error('Unreachable branch in tabs')
+          return null
+      }
+    }}
+  </Tabs.Content>
+</Tabs>
+```
+
+Опишем главную входную точку:
+
+```tsx
+import React, { useEffect, useMemo, useState } from 'react'
+
+import { useEvent } from '../../hooks'
+import { Content } from './Content'
+import { Switch } from './Switch'
+import { Switcher } from './Switcher'
+import { Context, TabsContext, themes } from './context'
+
+export type TabsProps = React.PropsWithChildren<{
+  theme?: ValueOf<typeof themes>
+  active: string
+  onActiveChange?: (active: string) => void
+}>
+
+function Tabs(props: TabsProps) {
+  const {
+    theme = 'primary',
+    active: activeProps,
+    children,
+    onActiveChange,
+  } = props
+
+  const [active, setActiveId] = useState(activeProps)
+
+  const handleActiveChange = useEvent((active: string) => {
+    onActiveChange?.(active)
+  })
+
+  const value = useMemo(
+    (): Context => ({ active, change: setActiveId, theme }),
+    [active, theme],
+  )
+
+  useLayoutEffect(() => {
+    // sync state active tab from outside
+    setActiveId(activeProps)
+  }, [activeProps])
+
+  useEffect(() => {
+    if (activeProps !== active) {
+      handleActiveChange(activeProps)
+    }
+  }, [active, handleActiveChange])
+
+  return <TabsContext.Provider value={value}>{children}</TabsContext.Provider>
+}
+
+Tabs.themes = themes
+Tabs.Switcher = Switcher
+Tabs.Switch = Switch
+Tabs.Content = Content
+
+export { Tabs }
+```
+
+Опишем остальное:
+
+```tsx filename="Switch.tsx"
+import cx from 'classnames'
+import React from 'react'
+
+import { Button } from '../Button/Button'
+import styles from './Tabs.module.scss'
+import { useTabsContext } from './context'
+
+export type SwitchProps = {
+  tabId: string
+  children: React.ReactNode
+  className?: string
+}
+
+export function Switch({ tabId, ...props }: SwitchProps) {
+  const tabs = useTabsContext()
+  const className = cx(styles.tabButton, props.className)
+
+  if (tabs.active === tabId) {
+    return <Button {...props} className={className} disabled theme="rock" />
+  }
+  return (
+    <Button
+      {...props}
+      theme="empty"
+      className={className}
+      onClick={() => tabs.change(tabId)}
+    />
+  )
+}
+```
+
+```tsx filename="Switcher.tsx"
+import cx from 'classnames'
+import React from 'react'
+
+import styles from './Tabs.module.scss'
+import { useTabsContext } from './context'
+
+export type SwitcherProps = React.ComponentProps<'div'>
+
+export const Switcher = React.forwardRef<HTMLDivElement, SwitcherProps>(
+  function Switcher({ className, ...restProps }: SwitcherProps, ref) {
+    const { theme } = useTabsContext()
+    return (
+      <div
+        ref={ref}
+        className={cx(styles.base, styles[`base__theme-${theme}`])}
+        {...restProps}
+      />
+    )
+  },
+)
+```
+
+```tsx filename="context.tsx"
+import { createContext, useContext } from 'react'
+
+export const themes = {
+  primary: 'primary',
+} as const
+
+export type Theme = ValueOf<typeof themes>
+
+export type Context = {
+  theme: Theme
+  active: string
+  change: (id: string) => void
+}
+
+export const TabsContext = createContext<Context | null>(null)
+
+export function useTabsContext() {
+  const context = useContext(TabsContext)
+  if (context === null) {
+    throw new Error('You can use tabs hooks only with Tabs component')
+  }
+  return context
+}
+```
+
+```tsx filename="Content.tsx"
+import { Fragment } from 'react'
+
+import { useTabsContext } from './context'
+
+export type ContentProps = {
+  children: (active: string) => JSX.Element | null
+}
+
+export function Content({ children }: ContentProps) {
+  const tabs = useTabsContext()
+
+  return <Fragment key={tabs.active}>{children(tabs.active)}</Fragment>
+}
+```
+
+Теперь, как можно заметить мы получаем составной компонент, который можно использовать гибко. Так же можно внутри `Tab` отобразить любой контент - текст, иконку, иконку с текстом, с уведомлением и тд и тп.
+
+Так же можно подписаться на любой элемент, взять `ref`, сделать анимации, сделать кастомные переключатели, сохранив логику работы табов.
+
+```scss filename="Tabs.module.scss"
+.base {
+  padding: 6px;
+  background: #1f2331;
+  border-radius: 12px;
+  display: flex;
+  align-items: stretch;
+  justify-self: stretch;
+}
+
+.tabButton {
+  flex: 1 1 auto;
+  text-align: center;
+}
+```
+
+## Минусы и плюсы
+
+### Плюсы
+
+- Гибкость
+- Возможность переиспользования
+- Возможность расширения
+- Возможность кастомизации
+- Возможность использования в любом месте
+
+### Минусы
+
+- Сложность в понимании
+- Больше частей кода, которые нужно читать по отдельности
+
+### Когда использовать
+
+В общих компонентах, такие как UIKit или в компонентах, которые будут использоваться в нескольких местах. Так же, если вы хотите дать возможность пользователю компонента делать кастомизацию, то это тоже хороший вариант.
+
+Не стоит использовать в компонентах, которые будут использоваться только в одном месте, так как это будет лишним кодом, который нужно будет читать и понимать. Например компонент на фиче, который достает данные, по месту с ними работает и не предполагает никакого дополнительного переиспользования.
